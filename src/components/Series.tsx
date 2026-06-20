@@ -54,11 +54,29 @@ function generateDemoEpisodes(seriesName: string): Episode[] {
    SeriesPage component
    ═══════════════════════════════════════════════════════════════════════════ */
 export default function SeriesPage() {
-  const slug = useAppStore((s) => s.pageParams.slug || '');
+  /* ── FIX: Read slug from BOTH the store (in-app nav) AND the URL (direct load) ── */
+  const storeSlug = useAppStore((s) => s.pageParams.slug || '');
+  const setPageParams = useAppStore((s) => s.setPageParams);
   const navigate = useAppStore((s) => s.navigate);
   const toggleWatchlist = useAppStore((s) => s.toggleWatchlist);
   const isInWatchlist = useAppStore((s) => s.isInWatchlist);
   const recordWatched = useAppStore((s) => s.recordWatched);
+
+  /* ── FIX: On direct URL load (/series?slug=...), seed the store from the URL ── */
+  const [urlSlug, setUrlSlug] = useState('');
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const fromUrl = params.get('slug') || '';
+      if (fromUrl && !storeSlug) {
+        setPageParams({ slug: fromUrl });
+      }
+      setUrlSlug(fromUrl);
+    }
+  }, [storeSlug, setPageParams]);
+
+  /* ── Use store slug when available (in-app nav), fall back to URL slug ── */
+  const slug = storeSlug || urlSlug;
 
   // Find the series
   const series: Series | undefined = getSeriesBySlug(slug);
