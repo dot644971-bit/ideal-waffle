@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/lib/store';
 import { SERIES_LIST, getSeriesBySlug, posterUrl, SITE_NAME } from '@/lib/config';
 import type { Episode } from '@/lib/types';
+import { useAuth } from '@/hooks/useAuth';
 
 // ─────────────────────────────────────────────────────────
 //  ↓ YOUTUBE API KEY'İNİZİ BURAYA YAZIN
@@ -44,6 +45,21 @@ async function fetchYouTubePlaylist(playlistId: string): Promise<Episode[]> {
 }
 
 export default function SeriesPage() {
+  /* ── Auth Guard ── */
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  if (authLoading) {
+    return (
+      <div style={{ display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#0a0a0a',color:'#e5e5e5',fontFamily:"'Outfit',sans-serif" }}>
+        <style>{`@keyframes mx-spin{to{transform:rotate(360deg)}}`}</style>
+        <div style={{ textAlign:'center' }}>
+          <div style={{ width:40,height:40,margin:'0 auto 20px',border:'3px solid rgba(229,9,20,0.2)',borderTopColor:'#e50914',borderRadius:'50%',animation:'mx-spin 0.8s linear infinite' }} />
+          <p style={{ fontSize:'0.95rem',color:'#a3a3a3' }}>Loading...</p>
+        </div>
+      </div>
+    );
+  }
+  if (!isAuthenticated) return null;
+
   const router = useRouter();
   const storeSlug     = useAppStore((s) => s.pageParams.slug || '');
   const navigate       = useAppStore((s) => s.navigate);
