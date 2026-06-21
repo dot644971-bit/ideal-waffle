@@ -1,47 +1,47 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation'; // useSearchParams eklendi
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
+// 1. KULLANICI VERİSİ TİPİ
 interface KullaniciVerisi {
   id: number;
   isim: string;
   email: string;
 }
 
-export default function DashboardPage() {
+// 2. ASIL İÇERİK BİLEŞENİ (useSearchParams burada kullanılıyor)
+function DashboardIcerik() {
   const [kullanici, setKullanici] = useState<KullaniciVerisi | null>(null);
   const [yukleniyor, setYukleniyor] = useState(true);
   const [hataMesaji, setHataMesaji] = useState('');
   const router = useRouter();
-  const searchParams = useSearchParams(); // URL parametrelerini okumak için
+  const searchParams = useSearchParams(); // DİKKAT: Bu yüzden Suspense lazım
 
   useEffect(() => {
     const tokenDogrula = async () => {
       let token = localStorage.getItem('megax_token');
 
-      // 1. ADIM: EĞER LOCALSTORAGE'DA YOKSA, URL'DEN GELMİŞ OLABİLİR MI KONTROL ET
+      // Eğer localde yoksa, URL'den (auth.megaxtoon.eu'dan yönlendirme) gelmiş olabilir
       if (!token) {
         const urlToken = searchParams.get('token');
         if (urlToken) {
-          // URL'den token geldi, onu localStorage'a kaydet (sonraki girişler için)
           localStorage.setItem('megax_token', urlToken);
           token = urlToken;
-          
-          // URL'deki token'ı gizle (güvenlik için temiz URL yap)
+          // URL'deki ?token=... kısmını sil (güvenlik ve temizlik için)
           window.history.replaceState({}, '', window.location.pathname);
         }
       }
 
-      // 2. ADIM: Hâlâ token yoksa, kullanıcı giriş yapmamış demektir
+      // Hala token yoksa giriş yapmamışsayız
       if (!token) {
-        setHataMesaji('Bu sayfayı görmek için giriş yapmalısınız. (Token bulunamadı)');
+        setHataMesaji('Token bulunamadı. Lütfen giriş yapın.');
         setYukleniyor(false);
         return;
       }
 
       try {
-        // 3. ADIM: PHP'ye token'ı gönder
+        // PHP'ye token'ı gönder
         const response = await fetch(`https://auth.megaxtoon.eu/token_verify.php?token=${encodeURIComponent(token)}`);
 
         if (!response.ok) {
@@ -50,17 +50,15 @@ export default function DashboardPage() {
 
         const data = await response.json();
 
-        // 4. ADIM: Sonuçları değerlendir
         if (data.success) {
           setKullanici(data.user);
         } else {
-          // Token geçersizse sil
           localStorage.removeItem('megax_token');
-          setHataMesaji(data.message || 'Token geçersiz veya süresi dolmuş.');
+          setHataMesaji(data.message || 'Token geçersiz.');
         }
       } catch (err) {
-        console.error('Detaylı Hata:', err);
-        setHataMesaji('Sunucuyla iletişim kurulamadı. AdBlock eklentisinin kapalı olduğundan emin olun.');
+        console.error('Hata Detayı:', err);
+        setHataMesaji('Sunucuya ulaşılamıyor.');
         localStorage.removeItem('megax_token');
       } finally {
         setYukleniyor(false);
@@ -70,7 +68,7 @@ export default function DashboardPage() {
     tokenDogrula();
   }, [router, searchParams]);
 
-  // --- EKRAN ÇİZİMİ ---
+  // --- EKRANA ÇİZİM KISIMLARI ---
 
   if (yukleniyor) {
     return <div style={{ textAlign: 'center', marginTop: '100px' }}><h2>Token doğrulanıyor...</h2></div>;
@@ -80,13 +78,13 @@ export default function DashboardPage() {
     return (
       <div style={{ textAlign: 'center', marginTop: '100px' }}>
         <h2 style={{ color: 'red' }}>{hataMesaji}</h2>
-        <button onClick={() => router.push('/login')} style={{ marginTop: '20px', padding: '10px 20px', cursor: 'pointer' }}>Giriş Sayfasına Dön</button>
+        <button onClick={() => router.push('/login')} style={{ marginTop: '20px', padding: '10px 20px', cursor: 'pointer' }}>Giriş Yap</button>
       </div>
     );
   }
 
   if (!kullanici) {
-    return <div style={{ textAlign: 'center', marginTop: '100px' }}><h2>Kullanıcı verisi yüklenemedi.</h2></div>;
+    return <div style={{ textAlign: 'center', marginTop: '100px' }}><h2>Veri yüklenemedi.</h2></div>;
   }
 
   return (
@@ -94,12 +92,12 @@ export default function DashboardPage() {
       <div style={{ background: '#f9f9f9', padding: '20px', borderRadius: '8px', border: '1px solid #ddd' }}>
         <h1>Hoş Geldiniz, {kullanici.isim}!</h1>
         <p><strong>E-posta:</strong> {kullanici.email}</p>
-        <p style={{ color: 'green', marginTop: '20px' }}>✅ Başarıyla giriş yapıldı ve sayfa çökmedi!</p>
+        <p style={{ color: 'green', marginTop: '20px' }}>✅ Sayfa başarıyla açıldı!</p>
         
         <button 
           onClick={() => {
             localStorage.removeItem('megax_token');
-            window.location.href = 'https://auth.megaxtoon.eu/logout.php'; // Çıkış işleminizi yapın
+            window.location.href = 'https://auth.megaxtoon.eu/cikis.php'; // Kendi çıkış linkiniz
           }}
           style={{ marginTop: '20px', padding: '10px 20px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
         >
@@ -107,5 +105,19 @@ export default function DashboardPage() {
         </button>
       </div>
     </div>
+  );
+}
+
+// 3. ANA DOSYA EXPORT (SUSPENSE İLE SARMALAMA - REACT #310 HATASINI ÇÖZER)
+export default function DashboardPage() {
+  return (
+    // React error #310'ı çözen sihirli kelime: Suspense
+    <Suspense fallback={
+      <div style={{ textAlign: 'center', marginTop: '100px' }}>
+        <h2>Sayfa hazırlanıyor...</h2>
+      </div>
+    }>
+      <DashboardIcerik />
+    </Suspense>
   );
 }
