@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/lib/store';
 import { getSeriesBySlug, SITE_NAME } from '@/lib/config';
 import type { Episode } from '@/lib/types';
-import { useAuth } from '@/hooks/useAuth';
 
 // ─────────────────────────────────────────────────────────
 //  ↓ YOUTUBE API KEY'İNİZİ BURAYA YAZIN
@@ -47,21 +46,6 @@ const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
 const SPEED_LABELS: Record<number,string> = { 0.25:'×0.25', 0.5:'×0.5', 0.75:'×0.75', 1:'Normal', 1.25:'×1.25', 1.5:'×1.5', 2:'×2' };
 
 export default function PlayerPage() {
-  /* ── Auth Guard ── */
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
-  if (authLoading) {
-    return (
-      <div style={{ display:'flex',alignItems:'center',justifyContent:'center',minHeight:'100vh',background:'#0a0a0a',color:'#e5e5e5',fontFamily:"'Outfit',sans-serif" }}>
-        <style>{`@keyframes mx-spin{to{transform:rotate(360deg)}}`}</style>
-        <div style={{ textAlign:'center' }}>
-          <div style={{ width:40,height:40,margin:'0 auto 20px',border:'3px solid rgba(229,9,20,0.2)',borderTopColor:'#e50914',borderRadius:'50%',animation:'mx-spin 0.8s linear infinite' }} />
-          <p style={{ fontSize:'0.95rem',color:'#a3a3a3' }}>Loading...</p>
-        </div>
-      </div>
-    );
-  }
-  if (!isAuthenticated) return null;
-
   const router = useRouter();
   const storeParams = useAppStore((s) => s.pageParams);
   const navigate    = useAppStore((s) => s.navigate);
@@ -103,15 +87,6 @@ export default function PlayerPage() {
   const [skipAnim,      setSkipAnim]      = useState<{dir:'L'|'R';k:number}|null>(null);
   const [castCopied,    setCastCopied]    = useState(false);
 
-  // Cast (TV'ye yansıt) state
-  const [castReady,     setCastReady]     = useState(false);
-  const [castConnected, setCastConnected] = useState(false);
-  const [castDeviceName,setCastDeviceName]= useState('');
-
-  // Subtitle (altyazı) state
-  const [subTracks, setSubTracks] = useState<{languageCode:string;displayName:string}[]>([]);
-  const [activeSub, setActiveSub] = useState<string>('');
-
   const ytRef      = useRef<any>(null);
   const wrapRef    = useRef<HTMLDivElement>(null);
   const progRef    = useRef<HTMLDivElement>(null);
@@ -120,7 +95,6 @@ export default function PlayerPage() {
   const touchStart = useRef<{x:number;y:number;t:number}|null>(null);
   const lastTap    = useRef<{x:number;t:number}|null>(null);
   const playerKey  = useRef('yt-player-div');
-  const castSessionRef = useRef<any>(null);
 
   /* ── RAF tick for progress ── */
   const startRaf = useCallback(() => {
@@ -164,37 +138,6 @@ export default function PlayerPage() {
     }
     return () => stopRaf();
   }, []); // eslint-disable-line
-
-  /* ── Load Google Cast (Chromecast) Sender SDK — TV'ye yansıt ── */
-  useEffect(() => {
-    (window as any).__onGCastApiAvailable = (isAvailable: boolean) => {
-      if (!isAvailable) return;
-      const cast = (window as any).chrome?.cast;
-      if (!cast) return;
-      try {
-        const sessionRequest = new cast.SessionRequest('233637DE'); // YouTube cast receiver
-        const apiConfig = new cast.ApiConfig(
-          sessionRequest,
-          (session: any) => {
-            castSessionRef.current = session;
-            setCastConnected(true);
-            setCastDeviceName(session.receiver?.friendlyName || 'TV');
-            session.addUpdateListener((isAlive: boolean) => {
-              if (!isAlive) { castSessionRef.current = null; setCastConnected(false); setCastDeviceName(''); }
-            });
-          },
-          (available: boolean) => setCastReady(!!available),
-          cast.AutoJoinPolicy?.ORIGIN_SCOPED
-        );
-        cast.initialize(apiConfig, () => setCastReady(true), () => setCastReady(false));
-      } catch { setCastReady(false); }
-    };
-    if (!document.querySelector('script[src*="cast_sender"]')) {
-      const s = document.createElement('script');
-      s.src = 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1';
-      document.head.appendChild(s);
-    }
-  }, []);
 
   /* ── Switch video when episode changes ── */
   useEffect(() => {
@@ -273,81 +216,13 @@ export default function PlayerPage() {
     else document.exitFullscreen();
   }, []);
 
-  /* ── TV'ye Yansıt (Chromecast) ── */
-  const sendCastLoad = useCallback((vid: string) => {
-    const session = castSessionRef.current; if (!session) return;
-    const msg = { type: 'LOAD', data: { video: { videoId: vid }, theme: 'CLASSIC' } };
-    try { session.sendMessage('urn:x-cast:com.google.youtube.mdx', msg, () => {}, () => {}); } catch {}
-  }, []);
-
-  const startCast = useCallback(() => {
-    const cast = (window as any).chrome?.cast;
-    if (!cast) return;
-    cast.requestSession(
-      (session: any) => {
-        castSessionRef.current = session;
-        setCastConnected(true);
-        setCastDeviceName(session.receiver?.friendlyName || 'TV');
-        sendCastLoad(curVideo);
-        try { ytRef.current?.pauseVideo?.(); } catch {}
-      },
-      () => {}
-    );
-  }, [curVideo, sendCastLoad]);
-
-  const stopCast = useCallback(() => {
-    const session = castSessionRef.current;
-    if (session) { try { session.stop(() => {}, () => {}); } catch {} }
-    castSessionRef.current = null;
-    setCastConnected(false);
-    setCastDeviceName('');
-  }, []);
-
-  /* ── Altyazı seçimi (YouTube captions modülü) ── */
-  const openSubtitles = useCallback(() => {
-    setShowSpeed(false); setShowCast(false); setShowEpPanel(false);
-    setShowSub(p => {
-      const next = !p;
-      if (next && ytRef.current) {
-        try {
-          ytRef.current.loadModule('captions');
-          setTimeout(() => {
-            try {
-              const list = ytRef.current?.getOption?.('captions', 'tracklist') || [];
-              setSubTracks(list);
-            } catch {}
-          }, 350);
-        } catch {}
-      }
-      return next;
-    });
-  }, []);
-
-  const selectSubtitle = useCallback((track: {languageCode:string;displayName:string} | null) => {
-    if (!ytRef.current) return;
-    try {
-      if (!track) {
-        ytRef.current.setOption('captions', 'reload', false);
-        ytRef.current.unloadModule?.('captions');
-        ytRef.current.setOption?.('cc', 'load_policy', 0);
-        setActiveSub('');
-      } else {
-        ytRef.current.loadModule('captions');
-        ytRef.current.setOption('captions', 'track', track);
-        ytRef.current.setOption('cc', 'load_policy', 1);
-        setActiveSub(track.languageCode);
-      }
-    } catch {}
-  }, []);
-
   const switchEp = useCallback((vid: string, idx: number) => {
     setCurVideo(vid); setCurEp(idx);
     navigate('player', { slug, video: vid, ep: String(idx) });
     window.history.replaceState(null,'',`/player?slug=${encodeURIComponent(slug)}&video=${encodeURIComponent(vid)}&ep=${idx}`);
     setShowEpPanel(false);
-    if (castConnected) sendCastLoad(vid);
     wrapRef.current?.scrollIntoView({ behavior:'smooth' });
-  }, [slug, navigate, castConnected, sendCastLoad]);
+  }, [slug, navigate]);
 
   /* ── Progress bar ── */
   const onProgressClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -548,52 +423,32 @@ export default function PlayerPage() {
 
                   {/* Subtitle */}
                   <div className="pop-wrap">
-                    <button className="cb" title="Altyazı" onClick={openSubtitles}>
+                    <button className="cb" title="Altyazı / Dublaj" onClick={()=>{setShowSub(p=>!p);setShowSpeed(false);setShowCast(false);setShowEpPanel(false);}}>
                       <svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 11H6v-2h6v2zm8-4H6V9h14v2z"/></svg>
                     </button>
                     {showSub&&(
                       <div className="pop-menu sub-menu">
-                        <div className="pop-title">Altyazı</div>
-                        <button className={`pop-item${activeSub===''?' pop-active':''}`} onClick={()=>selectSubtitle(null)}>
-                          Kapalı
-                        </button>
-                        {subTracks.length>0
-                          ? subTracks.map(t=>(
-                              <button key={t.languageCode} className={`pop-item${activeSub===t.languageCode?' pop-active':''}`} onClick={()=>selectSubtitle(t)}>
-                                {t.displayName || t.languageCode}
-                              </button>
-                            ))
-                          : <p className="pop-desc">Bu video için altyazı bulunamadı veya yükleniyor…</p>}
+                        <div className="pop-title">Altyazı / Dublaj</div>
+                        <p className="pop-desc">Altyazı ve dublaj içeriğin kendisine bağlıdır. YouTube altyazısı için aşağıdaki bağlantıyı kullanın.</p>
+                        <a className="pop-link-btn" href={ytUrl} target="_blank" rel="noopener noreferrer">YouTube'da Aç →</a>
                       </div>
                     )}
                   </div>
 
                   {/* Cast */}
                   <div className="pop-wrap">
-                    <button className={`cb${castConnected?' pop-active':''}`} title="TV'ye Yansıt" onClick={()=>{setShowCast(p=>!p);setShowSpeed(false);setShowSub(false);setShowEpPanel(false);}}>
+                    <button className="cb" title="TV'ye Yansıt" onClick={()=>{setShowCast(p=>!p);setShowSpeed(false);setShowSub(false);setShowEpPanel(false);}}>
                       <svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/></svg>
                     </button>
                     {showCast&&(
                       <div className="pop-menu cast-menu">
                         <div className="pop-title">TV'ye Yansıt</div>
-                        {castConnected ? (
-                          <>
-                            <p className="pop-desc">Bağlandı: <strong>{castDeviceName||'TV'}</strong></p>
-                            <button className="pop-link-btn" style={{background:'rgba(255,255,255,0.08)',border:'1px solid rgba(255,255,255,0.2)'}} onClick={stopCast}>
-                              Bağlantıyı Kes
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <p className="pop-desc">{castReady ? 'Yakındaki Chromecast / Google TV cihazına aktarın.' : 'Chromecast aranıyor… Tarayıcınız desteklemiyorsa aşağıdaki bağlantıyı kullanın.'}</p>
-                            {castReady&&<button className="pop-link-btn" onClick={startCast}>Cihaz Seç ve Yansıt</button>}
-                            <a className="pop-link-btn" style={{marginTop:6,background:'rgba(255,255,255,0.08)',border:'1px solid rgba(255,255,255,0.2)'}} href={ytUrl} target="_blank" rel="noopener noreferrer">YouTube'da Aç</a>
-                            <button className="pop-link-btn" style={{marginTop:6,background:'rgba(255,255,255,0.08)',border:'1px solid rgba(255,255,255,0.2)'}}
-                              onClick={()=>{ navigator.clipboard?.writeText(ytUrl); setCastCopied(true); setTimeout(()=>setCastCopied(false),2000); }}>
-                              {castCopied?'✓ Kopyalandı!':'Linki Kopyala'}
-                            </button>
-                          </>
-                        )}
+                        <p className="pop-desc">Chromecast veya AirPlay ile TV'ye aktarabilirsiniz. Bağlantıyı kopyalayıp TV'de açın ya da mobil YouTube uygulamasından Cast edin.</p>
+                        <a className="pop-link-btn" href={ytUrl} target="_blank" rel="noopener noreferrer">YouTube'da Aç</a>
+                        <button className="pop-link-btn" style={{marginTop:6,background:'rgba(255,255,255,0.08)',border:'1px solid rgba(255,255,255,0.2)'}}
+                          onClick={()=>{ navigator.clipboard?.writeText(ytUrl); setCastCopied(true); setTimeout(()=>setCastCopied(false),2000); }}>
+                          {castCopied?'✓ Kopyalandı!':'Linki Kopyala'}
+                        </button>
                       </div>
                     )}
                   </div>
