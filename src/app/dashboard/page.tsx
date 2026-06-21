@@ -1,140 +1,123 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
-// Kullanıcı verisi tipi
+// TypeScript tip tanımlaması
 interface KullaniciVerisi {
   id: number;
   isim: string;
   email: string;
 }
 
-// Asıl işlemlerin yapıldığı iç bileşen
-function DashboardIcerik() {
+export default function DashboardPage() {
   const [kullanici, setKullanici] = useState<KullaniciVerisi | null>(null);
   const [yukleniyor, setYukleniyor] = useState(true);
-  const [hata, setHata] = useState('');
+  const [hataMesaji, setHataMesaji] = useState('');
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   useEffect(() => {
-    const oturumuBaslat = async () => {
-      let token = localStorage.getItem('megax_token');
-      const urlToken = searchParams.get('token');
+    const tokenDogrula = async () => {
+      // 1. Token'ı oku (Login sayfasında "megax_token" olarak kaydetmiştik)
+      const token = localStorage.getItem('megax_token');
 
-      // ADIM 1: URL'den token geldi mi kontrol et (auth.megaxtoon.eu'dan yönlendirme)
-      if (urlToken) {
-        localStorage.setItem('megax_token', urlToken);
-        token = urlToken;
-        
-        // URL'deki ?token=... kısmını tarayıcı çubuğundan gizle (güvenlik)
-        window.history.replaceState({}, '', window.location.pathname);
-      }
-
-      // ADIM 2: Hala token yoksa giriş yapılmamıştır
+      // 2. Eğer tarayıcıda token yoksa, sayfayı çökertmeden uyarı ver
       if (!token) {
-        setHata('Giriş yapılmamış. Lütfen giriş sayfasına gidin.');
+        setHataMesaji('Bu sayfayı görmek için giriş yapmalısınız.');
         setYukleniyor(false);
         return;
       }
 
-      // ADIM 3: PHP'ye token'ı gönder ve doğrula
       try {
+        // 3. PHP dosyasına token'ı URL ile güvenli bir şekilde gönder
         const response = await fetch(`https://auth.megaxtoon.eu/token_verify.php?token=${encodeURIComponent(token)}`);
 
+        // 4. HTTP cevabı 200 (OK) değilse hata fırlat
         if (!response.ok) {
-          throw new Error('Sunucu hatası: ' + response.status);
+          throw new Error(`Sunucu Hatası: ${response.status}`);
         }
 
         const data = await response.json();
 
+        // 5. PHP'den success=true dönüyorsa kullanıcıyı state'e kaydet
         if (data.success) {
           setKullanici(data.user);
         } else {
-          // Token geçersizse localStorage'ı temizle
+          // Token geçersizse (süresi dolmuşsa) localStorage'ı temizle
           localStorage.removeItem('megax_token');
-          setHata(data.message || 'Token doğrulanamadı.');
+          setHataMesaji(data.message || 'Token geçersiz, lütfen tekrar giriş yapın.');
         }
       } catch (err) {
-        console.error('Doğrulama hatası:', err);
-        setHata('Sunucuya ulaşılamıyor.');
+        console.error('Token doğrulama detayı:', err);
+        setHataMesaji('Sunucuya ulaşılamıyor. (auth.megaxtoon.eu adresi çökmüş veya CORS engeli olabilir)');
         localStorage.removeItem('megax_token');
       } finally {
+        // 7. Ne olursa olsun yükleme durumunu bitir
         setYukleniyor(false);
       }
     };
 
-    oturumuBaslat();
-  }, [searchParams, router]);
+    tokenDogrula();
+  }, [router]);
 
-  // --- EKRAN ÇİZİMİ ---
+  // --- REACT'İN ÇÖKMESİNİ ENGELLEYEN EKRAN ÇİZİM ŞARTLARI ---
 
+  // Sayfa açıldı, API isteği atılıyor bekleniyor
   if (yukleniyor) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', marginTop: '100px', fontSize: '20px' }}>
-        Token doğrulanıyor, lütfen bekleyin...
+      <div style={{ textAlign: 'center', marginTop: '100px' }}>
+        <h2>Token doğrulanıyor, lütfen bekleyin...</h2>
       </div>
     );
   }
 
-  if (hata) {
+  // API'den hata döndü veya token yok
+  if (hataMesaji) {
     return (
       <div style={{ textAlign: 'center', marginTop: '100px' }}>
-        <h2 style={{ color: 'red' }}>{hata}</h2>
+        <h2 style={{ color: 'red' }}>Hata: {hataMesaji}</h2>
         <button 
-          onClick={() => window.location.href = 'https://auth.megaxtoon.eu/login.php'}
-          style={{ marginTop: '20px', padding: '10px 20px', fontSize: '16px', cursor: 'pointer' }}
+          onClick={() => router.push('/login')}
+          style={{ marginTop: '20px', padding: '10px 20px', cursor: 'pointer' }}
         >
-          Giriş Sayfasına Git
+          Giriş Sayfasına Dön
         </button>
       </div>
     );
   }
 
+  // Kullanıcı verisi null ise (Güvenlik önlemi)
   if (!kullanici) {
-    return <div style={{ textAlign: 'center', marginTop: '100px' }}>Kullanıcı bilgisi bulunamadı.</div>;
+    return (
+      <div style={{ textAlign: 'center', marginTop: '100px' }}>
+        <h2>Kullanıcı bilgisi yüklenemedi.</h2>
+      </div>
+    );
   }
 
-  // BAŞARILI GİRİŞ EKRANI
+  // --- HER ŞEY YOLUNDAYSA ASIL SAYFAYI ÇİZ ---
   return (
-    <div style={{ maxWidth: '600px', margin: '50px auto', padding: '20px', border: '1px solid #ccc', borderRadius: '10px', background: '#f9f9f9' }}>
-      <h1 style={{ color: '#333', borderBottom: '2px solid #0070f3', paddingBottom: '10px' }}>
-        Hoş Geldiniz!
-      </h1>
-      
-      <div style={{ marginTop: '20px', fontSize: '16px', lineHeight: '1.6' }}>
+    <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
+      <div style={{ background: '#f9f9f9', padding: '20px', borderRadius: '8px', border: '1px solid #ddd' }}>
+        <h1>Hoş Geldiniz!</h1>
         <p><strong>İsim:</strong> {kullanici.isim}</p>
         <p><strong>E-posta:</strong> {kullanici.email}</p>
         <p><strong>ID:</strong> {kullanici.id}</p>
-      </div>
+        
+        <div style={{ marginTop: '30px' }}>
+          <p>✅ Token başarılı bir şekilde doğrulandı ve sayfa çökmedi!</p>
+        </div>
 
-      <div style={{ marginTop: '30px', padding: '15px', background: '#d4edda', color: '#155724', borderRadius: '5px', border: '1px solid #c3e6cb' }}>
-        ✅ Sistem başarıyla çalıştı! Token alındı, doğrulandı ve sayfa çökmedi.
+        <button 
+          onClick={() => {
+            localStorage.removeItem('megax_token');
+            router.push('/login');
+          }}
+          style={{ marginTop: '20px', padding: '10px 20px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+        >
+          Çıkış Yap (Token Sil)
+        </button>
       </div>
-
-      <button 
-        onClick={() => {
-          localStorage.removeItem('megax_token');
-          window.location.href = 'https://auth.megaxtoon.eu/cikis.php'; // Kendi çıkış linkiniz
-        }}
-        style={{ marginTop: '20px', padding: '10px 20px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontSize: '16px' }}
-      >
-        Güvenli Çıkış Yap
-      </button>
     </div>
-  );
-}
-
-// ANA EXPORT: React #310 (Suspense) hatasını önleyen wrapper
-export default function AnaSayfa() {
-  return (
-    <Suspense fallback={
-      <div style={{ display: 'flex', justifyContent: 'center', marginTop: '100px', fontSize: '20px' }}>
-        Sayfa bileşenleri hazırlanıyor...
-      </div>
-    }>
-      <DashboardIcerik />
-    </Suspense>
   );
 }
