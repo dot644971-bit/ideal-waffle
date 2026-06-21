@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import HomePage from '@/components/HomePage';
 import LoginPage from '@/components/LoginPage';
@@ -9,40 +8,30 @@ import SeriesPage from '@/components/SeriesPage';
 import PlayerPage from '@/components/PlayerPage';
 import ProfilePage from '@/components/ProfilePage';
 
-// Token'ı URL'den okuyup store'a aktaran iç bileşen
-// useSearchParams() Suspense içinde olmalı — bu yüzden ayrı bileşen
-function TokenHandler() {
-  const searchParams = useSearchParams();
-  const { setToken } = useAppStore();
+export default function Page() {
+  const { currentPage, isLoggedIn, login, navigate } = useAppStore();
 
+  // Sayfa yüklendiğinde localStorage'dan kullanıcıyı geri yükle
   useEffect(() => {
-    const urlToken = searchParams.get('token');
-    if (urlToken) {
-      localStorage.setItem('megax_token', urlToken);
-      if (setToken) setToken(urlToken);
-      // Token'ı URL'den temizle (tarayıcı çubuğunda görünmesin)
-      window.history.replaceState({}, '', window.location.pathname);
+    if (!isLoggedIn) {
+      try {
+        const saved = localStorage.getItem('megax_user');
+        if (saved) {
+          const user = JSON.parse(saved);
+          if (user?.id) login(user);
+        }
+      } catch {
+        localStorage.removeItem('megax_user');
+      }
     }
-  }, [searchParams, setToken]);
+  }, []);
 
-  return null;
-}
-
-// Sayfa router bileşeni — Suspense DIŞINDA kalabilir
-function PageRouter() {
-  const { currentPage, isLoggedIn, navigate } = useAppStore();
-
-  useEffect(() => {
-    if (!isLoggedIn && currentPage !== 'login') {
-      // Giriş yapılmamışsa login sayfasına yönlendir
-    }
-  }, [isLoggedIn, currentPage, navigate]);
-
+  // Hash-based SPA routing
   useEffect(() => {
     const handleHash = () => {
-      const hash = window.location.hash.replace('#', '');
-      if (['home', 'login', 'player', 'series', 'profile'].includes(hash as typeof currentPage)) {
-        navigate(hash as typeof currentPage);
+      const hash = window.location.hash.replace('#', '') as typeof currentPage;
+      if (['home', 'login', 'player', 'series', 'profile'].includes(hash)) {
+        navigate(hash);
       }
     };
     window.addEventListener('hashchange', handleHash);
@@ -54,10 +43,10 @@ function PageRouter() {
     window.location.hash = currentPage;
     const titles: Record<string, string> = {
       home:    'MegaXtoon — Where Cartoon Lovers Unite',
-      login:   'Sign In — MegaXtoon',
-      profile: 'My Profile — MegaXtoon',
-      series:  'Series — MegaXtoon',
-      player:  'Now Playing — MegaXtoon',
+      login:   'Giriş Yap — MegaXtoon',
+      profile: 'Profilim — MegaXtoon',
+      series:  'Diziler — MegaXtoon',
+      player:  'Şimdi İzleniyor — MegaXtoon',
     };
     document.title = titles[currentPage] ?? 'MegaXtoon';
   }, [currentPage]);
@@ -70,18 +59,4 @@ function PageRouter() {
     case 'home':
     default:        return <HomePage />;
   }
-}
-
-// ANA EXPORT
-// TokenHandler useSearchParams kullandığı için Suspense içinde sarmalanmalı.
-// PageRouter ise Suspense dışında — sayfa gecikmesiz yüklenir.
-export default function Page() {
-  return (
-    <>
-      <Suspense fallback={null}>
-        <TokenHandler />
-      </Suspense>
-      <PageRouter />
-    </>
-  );
 }
