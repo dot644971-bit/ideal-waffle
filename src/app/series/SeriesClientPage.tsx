@@ -1,7 +1,5 @@
 'use client';
-
-import SeriesPage from '@/components/Series';
-
+import SeriesComponent from '@/components/Series';
 export default function SeriesClientPage() {
-  return <SeriesPage />;
+  return <SeriesComponent />;
 }
